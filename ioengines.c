@@ -354,11 +354,6 @@ enum fio_q_status td_io_queue(struct thread_data *td, struct io_u *io_u)
 
 	assert(fio_file_open(io_u->file));
 
-	/*
-	 * If using a write iolog, store this entry.
-	 */
-	log_io_u(td, io_u);
-
 	io_u->error = 0;
 	io_u->resid = 0;
 
@@ -387,6 +382,12 @@ enum fio_q_status td_io_queue(struct thread_data *td, struct io_u *io_u)
 
 	ret = td->io_ops->queue(td, io_u);
 	zbd_queue_io_u(td, io_u, ret);
+
+	/*
+	 * If using a write iolog, store this entry after queue. Queue might
+	 * change io_u->ioprio.
+	 */
+	log_io_u(td, io_u);
 
 	unlock_file(td, io_u->file);
 

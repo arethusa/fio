@@ -244,6 +244,7 @@ struct io_piece {
 	enum fio_ddir ddir;
 	unsigned long delay;
 	unsigned int file_action;
+	unsigned short ioprio;
 };
 
 /*

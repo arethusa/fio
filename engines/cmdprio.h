@@ -16,6 +16,7 @@ enum {
 	CMDPRIO_MODE_NONE,
 	CMDPRIO_MODE_PERC,
 	CMDPRIO_MODE_BSSPLIT,
+	CMDPRIO_MODE_IOLOG,
 };
 
 struct cmdprio_prio {
@@ -34,6 +35,12 @@ struct cmdprio_bsprio {
 struct cmdprio_bsprio_desc {
 	struct cmdprio_bsprio *bsprios;
 	unsigned int nr_bsprios;
+};
+
+struct cmdprio_iolog {
+	struct cmdprio_prio *prios;
+	unsigned int nr_prios;
+	unsigned int max_prios;
 };
 
 struct cmdprio_options {
@@ -152,6 +159,7 @@ struct cmdprio {
 	struct cmdprio_options *options;
 	struct cmdprio_prio perc_entry[CMDPRIO_RWDIR_CNT];
 	struct cmdprio_bsprio_desc bsprio_desc[CMDPRIO_RWDIR_CNT];
+	struct cmdprio_iolog iolog_entry[CMDPRIO_RWDIR_CNT];
 	unsigned int mode;
 };
 

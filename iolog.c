@@ -32,6 +32,7 @@ static int iolog_flush(struct io_log *log);
 
 static const char iolog_ver2[] = "fio version 2 iolog";
 static const char iolog_ver3[] = "fio version 3 iolog";
+static const char iolog_ver4[] = "fio version 4 iolog";
 
 void queue_io_piece(struct thread_data *td, struct io_piece *ipo)
 {
@@ -47,10 +48,10 @@ void log_io_u(const struct thread_data *td, const struct io_u *io_u)
 		return;
 
 	fio_gettime(&now, NULL);
-	fprintf(td->iolog_f, "%llu %s %s %llu %llu\n",
+	fprintf(td->iolog_f, "%llu %s %s %llu %llu %u\n",
 		(unsigned long long) utime_since_now(&td->io_log_start_time),
 		io_u->file->file_name, io_ddir_name(io_u->ddir), io_u->offset,
-		io_u->buflen);
+		io_u->buflen, io_u->ioprio);
 
 }
 
@@ -231,9 +232,11 @@ int read_iolog_get(struct thread_data *td, struct io_u *io_u)
 			io_u->verify_offset = ipo->offset;
 			io_u->buflen = ipo->len;
 			io_u->file = td->files[ipo->fileno];
+			io_u->ioprio = ipo->ioprio;
 			get_file(io_u->file);
-			dprint(FD_IO, "iolog: get %llu/%llu/%s\n", io_u->offset,
-						io_u->buflen, io_u->file->file_name);
+			dprint(FD_IO, "iolog: get %llu/%llu/%u/%s\n", io_u->offset,
+						io_u->buflen, io_u->ioprio,
+						io_u->file->file_name);
 			if (ipo->delay)
 				iolog_delay(td, ipo->delay);
 
@@ -439,9 +442,11 @@ int64_t iolog_items_to_fetch(struct thread_data *td)
 	return items_to_fetch;
 }
 
-#define io_act(_td, _r) (((_td)->io_log_version == 3 && (r) == 5) || \
+#define io_act(_td, _r) (((_td)->io_log_version == 4 && (r) == 6) || \
+					((_td)->io_log_version == 3 && (r) == 5) || \
 					((_td)->io_log_version == 2 && (r) == 4))
-#define file_act(_td, _r) (((_td)->io_log_version == 3 && (r) == 3) || \
+#define file_act(_td, _r) (((_td)->io_log_version == 4 && (r) == 3) || \
+					((_td)->io_log_version == 3 && (r) == 3) || \
 					((_td)->io_log_version == 2 && (r) == 2))
 
 /*
@@ -452,6 +457,7 @@ static bool read_iolog(struct thread_data *td)
 {
 	unsigned long long offset;
 	unsigned int bytes;
+	unsigned short ioprio;
 	unsigned long long delay = 0;
 	int reads, writes, trims, waits, fileno = 0, file_action = 0; /* stupid gcc */
 	char *rfname, *fname, *act;
@@ -481,17 +487,22 @@ static bool read_iolog(struct thread_data *td)
 		int r;
 		unsigned long long ttime;
 
-		if (td->io_log_version == 3) {
-			r = sscanf(p, "%llu %256s %256s %llu %u", &ttime, rfname, act,
+		if (td->io_log_version >= 3) { /* version 3 & 4 */
+			if (td->io_log_version == 4) {
+				r = sscanf(p, "%llu %256s %256s %llu %u %hu", &ttime, rfname, act,
+							&offset, &bytes, &ioprio);
+			} else { /* version 3 */
+				r = sscanf(p, "%llu %256s %256s %llu %u", &ttime, rfname, act,
 							&offset, &bytes);
+			}
 			delay = delay_since_ttime(td, ttime);
 			td->io_log_last_ttime = ttime;
 			/*
-			 * "wait" is not allowed with version 3
+			 * "wait" is not allowed with version 3 or newer.
 			 */
 			if (!strcmp(act, "wait")) {
 				log_err("iolog: ignoring wait command with"
-					" version 3 for file %s\n", fname);
+					" version 3 or newer for file %s\n", fname);
 				continue;
 			}
 		} else /* version 2 */
@@ -591,7 +602,7 @@ static bool read_iolog(struct thread_data *td)
 		ipo = calloc(1, sizeof(*ipo));
 		init_ipo(ipo);
 		ipo->ddir = rw;
-		if (td->io_log_version == 3)
+		if (td->io_log_version >= 3)
 			ipo->delay = delay;
 		if (rw == DDIR_WAIT) {
 			ipo->delay = offset;
@@ -609,6 +620,7 @@ static bool read_iolog(struct thread_data *td)
 			}
 			ipo->fileno = fileno;
 			ipo->file_action = file_action;
+			ipo->ioprio = ioprio;
 			td->o.size += bytes;
 		}
 
@@ -740,13 +752,15 @@ static bool init_iolog_read(struct thread_data *td, char *fname)
 	}
 
 	/*
-	 * versions 2 and 3 of the iolog store a specific string as the
+	 * versions 2, 3 and 4 of the iolog store a specific string as the
 	 * first line, check for that
 	 */
 	if (!strncmp(iolog_ver2, buffer, strlen(iolog_ver2)))
 		td->io_log_version = 2;
 	else if (!strncmp(iolog_ver3, buffer, strlen(iolog_ver3)))
 		td->io_log_version = 3;
+	else if (!strncmp(iolog_ver4, buffer, strlen(iolog_ver4)))
+		td->io_log_version = 4;
 	else {
 		log_err("fio: iolog version 1 is no longer supported\n");
 		fclose(f);
@@ -784,7 +798,7 @@ static bool init_iolog_write(struct thread_data *td)
 	/*
 	 * write our version line
 	 */
-	if (fprintf(f, "%s\n", iolog_ver3) < 0) {
+	if (fprintf(f, "%s\n", iolog_ver4) < 0) {
 		perror("iolog init\n");
 		return false;
 	}

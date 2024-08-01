@@ -1927,7 +1927,8 @@ struct io_u *get_io_u(struct thread_data *td)
 	/*
 	 * Remember the issuing context priority. The IO engine may change this.
 	 */
-	io_u->ioprio = td->ioprio;
+	if (!(td->flags & TD_F_READ_IOLOG))
+		io_u->ioprio = td->ioprio;
 	io_u->clat_prio_index = 0;
 out:
 	assert(io_u->file);

@@ -175,16 +175,16 @@ static inline void dprint_io_u(struct io_u *io_u, const char *p)
 	struct fio_file *f = io_u->file;
 
 	if (f)
-		dprint(FD_IO, "%s: io_u %p: off=0x%llx,len=0x%llx,ddir=%d,file=%s\n",
+		dprint(FD_IO, "%s: io_u %p: off=0x%llx,len=0x%llx,ddir=%d,prio=%u,file=%s\n",
 				p, io_u,
 				(unsigned long long) io_u->offset,
-				io_u->buflen, io_u->ddir,
+				io_u->buflen, io_u->ddir, io_u->ioprio,
 				f->file_name);
 	else
-		dprint(FD_IO, "%s: io_u %p: off=0x%llx,len=0x%llx,ddir=%d\n",
+		dprint(FD_IO, "%s: io_u %p: off=0x%llx,len=0x%llx,ddir=%d,prio=%u\n",
 				p, io_u,
 				(unsigned long long) io_u->offset,
-				io_u->buflen, io_u->ddir);
+				io_u->buflen, io_u->ddir, io_u->ioprio);
 }
 #else
 #define dprint_io_u(io_u, p)

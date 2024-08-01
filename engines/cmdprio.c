@@ -58,6 +58,47 @@ static void assign_clat_prio_index(struct cmdprio_prio *prio,
 	prio->clat_prio_index = clat_prio_index;
 }
 
+
+static int find_clat_prio_index_in_iolog(struct cmdprio_iolog *cmdprio_iolog,
+					 int32_t prio)
+{
+	int i;
+
+	for (i = 0; i < cmdprio_iolog->nr_prios; i++) {
+		if (cmdprio_iolog->prios[i].prio == prio)
+			return cmdprio_iolog->prios[i].clat_prio_index;
+	}
+
+	return -1;
+}
+
+
+/**
+ * assign_clat_prio_index_for_iolog - Update the clat_prio_index for the
+ * io_u from io log. Record the priority in the cmdprio_iolog struct if
+ * it's not already there.
+ */
+static void assign_clat_prio_index_for_iolog(struct cmdprio *cmdprio,
+					     struct io_u *io_u)
+{
+	int clat_prio_index = find_clat_prio_index_in_iolog(
+				&cmdprio->iolog_entry[io_u->ddir],
+				io_u->ioprio);
+	if (clat_prio_index == -1) {
+		/* Currently limit the number of priorities to BSSPLIT_MAX.
+		 * It can be improved by using a map:
+		 *   priority -> clat_prio_index.
+		 */
+		assert(cmdprio->iolog_entry[io_u->ddir].nr_prios + 1 <=
+                       cmdprio->iolog_entry[io_u->ddir].max_prios);
+		clat_prio_index = cmdprio->iolog_entry[io_u->ddir].nr_prios++;
+		cmdprio->iolog_entry[io_u->ddir].prios[clat_prio_index].prio = io_u->ioprio;
+		cmdprio->iolog_entry[io_u->ddir].prios[clat_prio_index].clat_prio_index = clat_prio_index;
+	}
+	io_u->clat_prio_index = clat_prio_index;
+}
+
+
 /**
  * init_cmdprio_values - Allocate a temporary array that can hold all unique
  * priorities (per ddir), so that we can assign_clat_prio_index() for each
@@ -280,6 +321,11 @@ bool fio_cmdprio_set_ioprio(struct thread_data *td, struct cmdprio *cmdprio,
 	uint32_t perc = 0;
 	int i;
 
+	if (cmdprio->mode == CMDPRIO_MODE_IOLOG) {
+		assign_clat_prio_index_for_iolog(cmdprio, io_u);
+		return true;
+	}
+
 	p = fio_cmdprio_percentage(cmdprio, io_u, &bsprio);
 	if (!p)
 		return false;
@@ -438,6 +484,21 @@ err:
 	return ret;
 }
 
+static int fio_cmdprio_gen_iolog(struct thread_data *td, struct cmdprio *cmdprio)
+{
+	/* Allocate BSSPLIT_MAX entries for each ddir in advance. */
+	enum fio_ddir ddir;
+	for (ddir = 0; ddir < CMDPRIO_RWDIR_CNT; ddir++) {
+		cmdprio->iolog_entry[ddir].prios = calloc(
+			BSSPLIT_MAX,
+			sizeof(struct cmdprio_prio));
+		cmdprio->iolog_entry[ddir].nr_prios = 0;
+		cmdprio->iolog_entry[ddir].max_prios= BSSPLIT_MAX;
+	}
+	
+	return 0;
+}
+
 static int fio_cmdprio_parse_and_gen(struct thread_data *td,
 				     struct cmdprio *cmdprio)
 {
@@ -465,6 +526,9 @@ static int fio_cmdprio_parse_and_gen(struct thread_data *td,
 	case CMDPRIO_MODE_PERC:
 		ret = fio_cmdprio_gen_perc(td, cmdprio);
 		break;
+	case CMDPRIO_MODE_IOLOG:
+		ret = fio_cmdprio_gen_iolog(td, cmdprio);
+		break;
 	default:
 		assert(0);
 		return 1;
@@ -484,6 +548,11 @@ void fio_cmdprio_cleanup(struct cmdprio *cmdprio)
 		free(cmdprio->bsprio_desc[ddir].bsprios);
 		cmdprio->bsprio_desc[ddir].bsprios = NULL;
 		cmdprio->bsprio_desc[ddir].nr_bsprios = 0;
+		free(cmdprio->iolog_entry[ddir].prios);
+		cmdprio->iolog_entry[ddir].prios = NULL;
+		cmdprio->iolog_entry[ddir].max_prios = 0;
+		cmdprio->iolog_entry[ddir].nr_prios = 0;
+
 	}
 
 	/*
@@ -499,9 +568,14 @@ int fio_cmdprio_init(struct thread_data *td, struct cmdprio *cmdprio,
 	struct thread_options *to = &td->o;
 	bool has_cmdprio_percentage = false;
 	bool has_cmdprio_bssplit = false;
+	bool has_cmdprio_iolog = false;
 	int i;
 
 	cmdprio->options = options;
+
+	if ((td->flags & TD_F_READ_IOLOG)) {
+		has_cmdprio_iolog = true;
+	}
 
 	if (options->bssplit_str && strlen(options->bssplit_str))
 		has_cmdprio_bssplit = true;
@@ -514,9 +588,9 @@ int fio_cmdprio_init(struct thread_data *td, struct cmdprio *cmdprio,
 	/*
 	 * Check for option conflicts
 	 */
-	if (has_cmdprio_percentage && has_cmdprio_bssplit) {
-		log_err("%s: cmdprio_percentage and cmdprio_bssplit options "
-			"are mutually exclusive\n",
+	if (has_cmdprio_percentage && has_cmdprio_bssplit && has_cmdprio_iolog) {
+		log_err("%s: cmdprio_percentage, cmdprio_bssplit and read_iolog"
+			"options are mutually exclusive\n",
 			to->name);
 		return 1;
 	}
@@ -525,6 +599,8 @@ int fio_cmdprio_init(struct thread_data *td, struct cmdprio *cmdprio,
 		cmdprio->mode = CMDPRIO_MODE_BSSPLIT;
 	else if (has_cmdprio_percentage)
 		cmdprio->mode = CMDPRIO_MODE_PERC;
+	else if (has_cmdprio_iolog)
+		cmdprio->mode = CMDPRIO_MODE_IOLOG;
 	else
 		cmdprio->mode = CMDPRIO_MODE_NONE;
 
