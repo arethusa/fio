@@ -5051,6 +5051,30 @@ The `timestamp` is relative to the beginning of the run (ie starts at 0). The
 that version 3 does not allow the `wait` action.
 
 
+Trace file format v4
+~~~~~~~~~~~~~~~~~~~~
+
+The fourth version of the trace file format was added in fio version 3.38. It
+forces each I/O action to have a priority associated with it.
+
+The first line of the trace file has to be::
+
+    fio version 4 iolog
+
+Following this can be lines in two different formats, which are described below.
+
+The file management format::
+
+    timestamp filename action
+
+The file I/O action format::
+
+    timestamp filename action offset length priority
+
+The `priority` is the I/O priotiy set by cmd_prio option. The `timestamp`,
+`filename`, `action`, `offset` and `length`  are identical to version 3.
+
+
 I/O Replay - Merging Traces
 ---------------------------
 
